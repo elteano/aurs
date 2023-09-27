@@ -1,0 +1,9 @@
+{
+	"authors": [
+		"Thomas Tucker"
+	],
+	"copyright": "Copyright © 2020, Thomas Tucker",
+	"description": "An application for querying and downloading packages from AUR.",
+	"license": "proprietary",
+	"name": "aurs"
+}

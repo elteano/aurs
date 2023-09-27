@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/aurs
+aurs.so
+aurs.dylib
+aurs.dll
+aurs.a
+aurs.lib
+aurs-test-*
+*.exe
+*.o
+*.obj
+*.lst
