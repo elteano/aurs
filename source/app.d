@@ -1,12 +1,18 @@
 import std.algorithm;
+import std.algorithm.comparison;
+import std.algorithm.mutation;
 import std.algorithm.searching;
 import std.array;
+import std.container.dlist;
+import std.container.rbtree;
 import std.getopt;
 import std.json;
-import std.process;
 import std.net.curl;
-import std.typecons;
+import std.process;
+import std.range;
+import std.range.primitives;
 import std.stdio;
+import std.typecons;
 
 immutable aur_prefix = "https://aur.archlinux.org";
 immutable search_prefix = aur_prefix ~ "/rpc/?v=5&type=search";
@@ -14,6 +20,8 @@ immutable info_prefix = aur_prefix ~ "/rpc/v5/info";
 
 bool includeOutOfDate;
 immutable print_format_string = "%-*.*s %-*.*s %s";
+
+immutable makepkg_command = escapeShellCommand("makepkg", "-sr");
 
 /*
  * General use flow:
@@ -35,7 +43,8 @@ int main(string[] args)
     SubComDef[string] subs = [
         "search": SubComDef(&subSearch, "Search for a package by name."),
         "info": SubComDef(&subInfo, "Look up a specific package and get information."),
-        "download": SubComDef(&subDownload, "Download a package tar file.")
+        "download": SubComDef(&subDownload, "Download a package tar file."),
+        "dlall": SubComDef(&subDownloadAll, "Download a package and dependencies.")
     ];
 
     if (args.length < 2 || args[1] !in subs)
@@ -98,32 +107,16 @@ void subInfo(string[] args)
   {
     writefln("%-11s : %s", item, resultsObj[item].integer);
   }
-
-  /*
-  Repository      : extra
-  Name            : zsh
-  Version         : 5.9-4
-  Description     : A very advanced and programmable command interpreter (shell) for UNIX
-  Architecture    : x86_64
-  URL             : https://www.zsh.org/
-  Licenses        : custom
-  Groups          : None
-  Provides        : None
-  Depends On      : pcre  libcap  gdbm
-  Optional Deps   : None
-  Conflicts With  : None
-  Replaces        : None
-  Download Size   : 2.23 MiB
-  Installed Size  : 6.62 MiB
-  Packager        : Frederik Schwan <freswa@archlinux.org>
-  Build Date      : Tue 04 Jul 2023 02:09:21 AM PDT
-  Validated By    : MD5 Sum  SHA-256 Sum  Signature
-  */
 }
 
 void subDownload(string[] args)
 {
   downloadPackage(args[0]);
+}
+
+void subDownloadAll(string[] args)
+{
+  downloadWithDependencies(args[0]);
 }
 
 auto lookupPackageName(string pkgname)
@@ -137,8 +130,16 @@ auto getPackageInfo(string pkgname)
 {
     string info_url = info_prefix ~ "/" ~ pkgname;
     auto info_result = get(info_url);
-    stdout.flush();
     return parseJSON(info_result);
+}
+
+auto getPackageInfo(T)(T pkglist)
+  if (isInputRange!T)
+{
+  string args_list = "?arg[]=" ~ join(pkglist, "&arg[]=");
+  string info_url = info_prefix ~ args_list;
+  auto info_result = get(info_url);
+  return parseJSON(info_result);
 }
 
 void searchPackage(string pkgname)
@@ -190,28 +191,59 @@ auto getDependencies(string pkgname)
 
 void downloadPackage(string pkgname)
 {
-	auto bundle = lookupPackageName(pkgname);
-	// Only get exact matches
-	auto goods = bundle["results"].array.filter!(r => r["Name"].str == pkgname).array;
-	if (goods.length == 0)
-	{
-		writeln("Package not found.");
-	}
-	else if (goods.length == 1)
-	{
-		writefln("Downloading package %s.", pkgname);
-		auto result = executeShell("curl '" ~ aur_prefix ~ goods[0]["URLPath"].str ~ "' | tar -xz");
-		if (result.status == 0)
-		{
-			writeln("Pakage downloaded.");
-		}
-		else
-		{
-			writeln("Error occurred with package download.");
-		}
-	}
-	else
-	{
-		writeln("Multiple results found. Error.");
-	}
+  auto infoObj = getPackageInfo(pkgname);
+  auto goods = infoObj["results"].array.filter!(r => r["Name"].str == pkgname).array;
+  if (goods.length > 0)
+  {
+    writefln("Downloading package %s.", pkgname);
+    downloadAndUntar(goods[0]);
+  }
+  else
+  {
+    stderr.writefln("Error: package %s not found.", pkgname);
+  }
+}
+
+void downloadAndUntar(JSONValue pkgInfo)
+{
+  auto filename = pkgInfo["URLPath"].str.split('/')[$-1];
+  download(aur_prefix ~ pkgInfo["URLPath"].str, filename);
+  auto result = escapeShellCommand("tar", "-xaf", filename).executeShell();
+  if (result.status != 0)
+  {
+    stderr.writeln("Error unpacking.");
+  }
+}
+
+void downloadWithDependencies(string pkgname)
+{
+  auto depQueue = DList!string();
+  string[] aurDeps;
+  depQueue.insert(pkgname);
+  auto seenPkgs = redBlackTree([pkgname]);
+  while (!depQueue.empty)
+  {
+    auto infoObj = getPackageInfo(depQueue.opSlice());
+    depQueue.clear();
+    foreach (depObj ; infoObj["results"].array)
+    {
+      string curName = depObj["Name"].str;
+      aurDeps ~= curName;
+      //writefln("Downloading package %s.", curName);
+      downloadAndUntar(depObj);
+      foreach (name ; depObj["Depends"].array)
+      {
+        if (seenPkgs.insert(name.str) > 0)
+        {
+          depQueue.insertBack(name.str.split('>')[0].split('=')[0]);
+        }
+      }
+    }
+  }
+  aurDeps = aurDeps[1..$];
+  //writeln("Dependencies:");
+  //writefln("%s", join(aurDeps.reverse, ' '));
+  writefln("for dep in %s", join(aurDeps.reverse.map!(s => "'" ~ s ~ "'"), ' '));
+  writeln("do; echo ${dep}; cd ${dep}; makepkg -srci --asdeps; cd ..; done");
+  writefln("cd %s; makepkg -srci; cd ..", pkgname);
 }
