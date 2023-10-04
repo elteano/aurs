@@ -1,0 +1,27 @@
+# AURS
+
+A D program for downloading AUR dependencies for Arch Linux.
+
+This is not intended to be a replacment for pacman, just something to live
+alongside it.
+
+## Usage
+
+    aurs search <pkgname>
+
+Look up a name in AUR, returning results with some additional information.
+
+    aurs info <pkgname>
+
+Get package data, including Name, Version, and Maintainer, in a similar format
+to `pacman -Si` or `pacman -Qi`.
+
+    aurs dlall <pkgname>
+
+Get the latest package snapshot for <pkgname> as well as all of its
+dependencies from AUR, and output a shell script to build them in reverse order
+of discovery.
+
+    aurs download <pkgname>
+
+Download the latest package snapshot for <pkgname> only.
