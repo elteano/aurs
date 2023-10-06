@@ -103,9 +103,13 @@ void subInfo(string[] args)
   {
     writefln("%-11s :", "License");
   }
-  foreach (item ; ["NumVotes", "Popularity"])
+  foreach (item ; ["NumVotes"])
   {
     writefln("%-11s : %s", item, resultsObj[item].integer);
+  }
+  foreach (item ; ["Popularity"])
+  {
+    writefln("%-11s : %f", item, resultsObj[item].floating);
   }
 }
 
