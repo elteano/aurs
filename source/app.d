@@ -40,27 +40,27 @@ alias SubComDef = Tuple!(void function(string[]), "func", string, "description")
 
 int main(string[] args)
 {
-    SubComDef[string] subs = [
-        "search": SubComDef(&subSearch, "Search for a package by name."),
-        "info": SubComDef(&subInfo, "Look up a specific package and get information."),
-        "download": SubComDef(&subDownload, "Download a package tar file."),
-        "dlall": SubComDef(&subDownloadAll, "Download a package and dependencies.")
-    ];
+  SubComDef[string] subs = [
+    "search": SubComDef(&subSearch, "Search for a package by name."),
+    "info": SubComDef(&subInfo, "Look up a specific package and get information."),
+    "download": SubComDef(&subDownload, "Download a package tar file."),
+    "dlall": SubComDef(&subDownloadAll, "Download a package and dependencies.")
+  ];
 
-    if (args.length < 2 || args[1] !in subs)
+  if (args.length < 2 || args[1] !in subs)
+  {
+    stderr.writefln("usage: %s [subcommand]", args[0]);
+    foreach (key ; subs.keys)
     {
-        stderr.writefln("usage: %s [subcommand]", args[0]);
-        foreach (key ; subs.keys)
-        {
-            stderr.writefln("   %10s  %s", key, subs[key].description);
-        }
-        return 1;
+      stderr.writefln("   %10s  %s", key, subs[key].description);
     }
-    else
-    {
-        subs[args[1]].func(args[2..$]);
-        return 0;
-    }
+    return 1;
+  }
+  else
+  {
+    subs[args[1]].func(args[2..$]);
+    return 0;
+  }
 }
 
 void subSearch(string[] args)
@@ -77,9 +77,10 @@ void subInfo(string[] args)
   auto resultsObj = pkgObj["results"].array[0];
   foreach (item ; ["Name", "Version", "Description", "Maintainer", "URL", "URLPath", "Submitter"])
   {
-    writefln("%-11s : %s", item, resultsObj[item].str);
+    if (item in resultsObj)
+      writefln("%-11s : %s", item, resultsObj[item].str);
   }
-  if (resultsObj["Depends"].array.length > 0)
+  if ("Depends" in resultsObj && resultsObj["Depends"].array.length > 0)
   {
     writefln("%-11s : %s", "Depends", resultsObj["Depends"].array[0].str);
     foreach (dep ; resultsObj["Depends"].array[1..$])
@@ -91,7 +92,7 @@ void subInfo(string[] args)
   {
     writefln("%-11s :", "Depends");
   }
-  if (resultsObj["License"].array.length > 0)
+  if ("License" in resultsObj && resultsObj["License"].array.length > 0)
   {
     writefln("%-11s : %s", "License", resultsObj["License"].array[0].str);
     foreach (lic ; resultsObj["License"].array[1..$])
@@ -105,11 +106,17 @@ void subInfo(string[] args)
   }
   foreach (item ; ["NumVotes"])
   {
-    writefln("%-11s : %s", item, resultsObj[item].integer);
+    if (item in resultsObj)
+      writefln("%-11s : %s", item, resultsObj[item].integer);
+    else
+      writefln("%-11s :", item);
   }
   foreach (item ; ["Popularity"])
   {
-    writefln("%-11s : %f", item, resultsObj[item].floating);
+    if (item in resultsObj)
+      writefln("%-11s : %f", item, resultsObj[item].floating);
+    else
+      writefln("%-11s :", item);
   }
 }
 
@@ -125,20 +132,20 @@ void subDownloadAll(string[] args)
 
 auto lookupPackageName(string pkgname)
 {
-	string search_url = search_prefix ~ "&arg=" ~ pkgname;
-	auto search_result = get(search_url);
-	return parseJSON(search_result);
+  string search_url = search_prefix ~ "&arg=" ~ pkgname;
+  auto search_result = get(search_url);
+  return parseJSON(search_result);
 }
 
 auto getPackageInfo(string pkgname)
 {
-    string info_url = info_prefix ~ "/" ~ pkgname;
-    auto info_result = get(info_url);
-    return parseJSON(info_result);
+  string info_url = info_prefix ~ "/" ~ pkgname;
+  auto info_result = get(info_url);
+  return parseJSON(info_result);
 }
 
-auto getPackageInfo(T)(T pkglist)
-  if (isInputRange!T)
+  auto getPackageInfo(T)(T pkglist)
+if (isInputRange!T)
 {
   string args_list = "?arg[]=" ~ join(pkglist, "&arg[]=");
   string info_url = info_prefix ~ args_list;
@@ -148,49 +155,49 @@ auto getPackageInfo(T)(T pkglist)
 
 void searchPackage(string pkgname)
 {
-	auto bundle = lookupPackageName(pkgname);
-	auto goods = bundle["results"].array.filter!(r => (includeOutOfDate || r["OutOfDate"].isNull)).array;
-	if (goods.length == 0)
-	{
-		writeln("No results found.");
-	}
-	else {
-		ulong nameLen = getFieldMaxLen(goods, "Name");
-		ulong maintLen = getFieldMaxLen(goods, "Maintainer");
-		writefln(print_format_string, nameLen, nameLen, "Package", maintLen, maintLen, "Maintainer", "Description");
-		foreach(r; goods)
-		{
-			string maint = r.tryGetField("Maintainer");
-			string desc = r.tryGetField("Description");
-			writefln(print_format_string, nameLen, nameLen, r["Name"].str, maintLen, maintLen, maint, desc);
-		}
-	}
+  auto bundle = lookupPackageName(pkgname);
+  auto goods = bundle["results"].array.filter!(r => (includeOutOfDate || r["OutOfDate"].isNull)).array;
+  if (goods.length == 0)
+  {
+    writeln("No results found.");
+  }
+  else {
+    ulong nameLen = getFieldMaxLen(goods, "Name");
+    ulong maintLen = getFieldMaxLen(goods, "Maintainer");
+    writefln(print_format_string, nameLen, nameLen, "Package", maintLen, maintLen, "Maintainer", "Description");
+    foreach(r; goods)
+    {
+      string maint = r.tryGetField("Maintainer");
+      string desc = r.tryGetField("Description");
+      writefln(print_format_string, nameLen, nameLen, r["Name"].str, maintLen, maintLen, maint, desc);
+    }
+  }
 }
 
 ulong getFieldMaxLen(JSONValue[] searchable, string field)
 {
-	return max(5, searchable.filter!(s => !s[field].isNull).map!(s => s[field].str.length).maxElement);
+  return max(5, searchable.filter!(s => !s[field].isNull).map!(s => s[field].str.length).maxElement);
 }
 
 string tryGetField(T)(T result, string fieldName)
 {
-	if (result[fieldName].isNull)
-	{
-		return "None";
-	}
-	else
-	{
-		return result[fieldName].str;
-	}
+  if (result[fieldName].isNull)
+  {
+    return "None";
+  }
+  else
+  {
+    return result[fieldName].str;
+  }
 }
 
 auto getDependencies(string pkgname)
 {
-    auto infoObj = getPackageInfo(pkgname);
-    foreach (dep ; infoObj["results"].array[0]["Depends"].array)
-    {
-        writeln(dep.str);
-    }
+  auto infoObj = getPackageInfo(pkgname);
+  foreach (dep ; infoObj["results"].array[0]["Depends"].array)
+  {
+    writeln(dep.str);
+  }
 }
 
 void downloadPackage(string pkgname)
@@ -235,13 +242,14 @@ void downloadWithDependencies(string pkgname)
       aurDeps ~= curName;
       //writefln("Downloading package %s.", curName);
       downloadAndUntar(depObj);
-      foreach (name ; depObj["Depends"].array)
-      {
-        if (seenPkgs.insert(name.str) > 0)
+      if ("Depends" in depObj)
+        foreach (name ; depObj["Depends"].array)
         {
-          depQueue.insertBack(name.str.split('>')[0].split('=')[0]);
+          if (seenPkgs.insert(name.str) > 0)
+          {
+            depQueue.insertBack(name.str.split('>')[0].split('=')[0]);
+          }
         }
-      }
     }
   }
   aurDeps = aurDeps[1..$];
