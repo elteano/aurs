@@ -18,10 +18,7 @@ immutable aur_prefix = "https://aur.archlinux.org";
 immutable search_prefix = aur_prefix ~ "/rpc/?v=5&type=search";
 immutable info_prefix = aur_prefix ~ "/rpc/v5/info";
 
-bool includeOutOfDate;
 immutable print_format_string = "%-*.*s %-*.*s %s";
-
-immutable makepkg_command = escapeShellCommand("makepkg", "-sr");
 
 /*
  * General use flow:
@@ -156,7 +153,7 @@ if (isInputRange!T)
 void searchPackage(string pkgname)
 {
   auto bundle = lookupPackageName(pkgname);
-  auto goods = bundle["results"].array.filter!(r => (includeOutOfDate || r["OutOfDate"].isNull)).array;
+  auto goods = bundle["results"].array.filter!(r => r["OutOfDate"].isNull).array;
   if (goods.length == 0)
   {
     writeln("No results found.");
