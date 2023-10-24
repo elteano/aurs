@@ -141,8 +141,8 @@ auto getPackageInfo(string pkgname)
   return parseJSON(info_result);
 }
 
-  auto getPackageInfo(T)(T pkglist)
-if (isInputRange!T)
+auto getPackageInfo(T)(T pkglist)
+  if (isInputRange!T)
 {
   string args_list = "?arg[]=" ~ join(pkglist, "&arg[]=");
   string info_url = info_prefix ~ args_list;
@@ -161,6 +161,7 @@ void searchPackage(string pkgname)
   else {
     ulong nameLen = getFieldMaxLen(goods, "Name");
     ulong maintLen = getFieldMaxLen(goods, "Maintainer");
+    stderr.writefln("Found %d packages.", goods.length);
     writefln(print_format_string, nameLen, nameLen, "Package", maintLen, maintLen, "Maintainer", "Description");
     foreach(r; goods)
     {
@@ -219,40 +220,72 @@ void downloadAndUntar(JSONValue pkgInfo)
   auto result = escapeShellCommand("tar", "-xaf", filename).executeShell();
   if (result.status != 0)
   {
-    stderr.writeln("Error unpacking.");
+    stderr.writefln("Error unpacking %s.", filename);
   }
 }
 
 void downloadWithDependencies(string pkgname)
 {
-  auto depQueue = DList!string();
-  string[] aurDeps;
-  depQueue.insert(pkgname);
-  auto seenPkgs = redBlackTree([pkgname]);
-  while (!depQueue.empty)
+  try
   {
-    auto infoObj = getPackageInfo(depQueue.opSlice());
-    depQueue.clear();
-    foreach (depObj ; infoObj["results"].array)
+    auto depQueue = DList!string();
+    auto pacTree = redBlackTree!string([]);
+    string[] aurDeps;
+    depQueue.insert(pkgname);
+    auto seenPkgs = redBlackTree([pkgname]);
+
+    while (!depQueue.empty)
     {
-      string curName = depObj["Name"].str;
-      aurDeps ~= curName;
-      //writefln("Downloading package %s.", curName);
-      downloadAndUntar(depObj);
-      if ("Depends" in depObj)
-        foreach (name ; depObj["Depends"].array)
-        {
-          if (seenPkgs.insert(name.str) > 0)
+      pacTree.insert(depQueue.opSlice());
+      auto infoObj = getPackageInfo(depQueue.opSlice());
+      depQueue.clear();
+      foreach (depObj ; infoObj["results"].array)
+      {
+        string curName = depObj["Name"].str;
+        stderr.writefln("Processing package %s.", curName);
+        aurDeps ~= curName;
+        //writefln("Downloading package %s.", curName);
+        downloadAndUntar(depObj);
+        if ("Depends" in depObj)
+          foreach (name ; depObj["Depends"].array)
           {
-            depQueue.insertBack(name.str.split('>')[0].split('=')[0]);
+            if (seenPkgs.insert(name.str) > 0)
+            {
+              depQueue.insertBack(name.str.split('>')[0].split('=')[0]);
+            }
           }
-        }
+        if ("MakeDepends" in depObj)
+          pacTree.insert(map!(s => s.str)(depObj["MakeDepends"].array));
+      }
+    }
+
+    stderr.writeln("Done with packages.");
+    auto pacDeps = filter!(a => !canFind(seenPkgs.opSlice(), a))(pacTree.opSlice());
+    if (aurDeps.length > 0)
+    {
+      aurDeps = aurDeps[1..$];
+
+      auto depStr = join(pacDeps, ' ');
+      if (depStr.length > 0)
+      {
+        writefln("sudo pacman -S --asdeps %s", depStr);
+      }
+
+      // Output shell commands to build everything - this is for the user to perform, not us
+      if (aurDeps.length > 0)
+      {
+        writefln("for dep in %s", join(aurDeps.reverse.map!(s => "'" ~ s ~ "'"), ' '));
+        writeln("do; echo ${dep}; cd ${dep}; makepkg -srci --asdeps; cd ..; done");
+      }
+      writefln("cd %s; makepkg -srci; cd ..", pkgname);
+    }
+    else
+    {
+      writeln("echo Package not found.");
     }
   }
-  aurDeps = aurDeps[1..$];
-  //writeln("Dependencies:");
-  //writefln("%s", join(aurDeps.reverse, ' '));
-  writefln("for dep in %s", join(aurDeps.reverse.map!(s => "'" ~ s ~ "'"), ' '));
-  writeln("do; echo ${dep}; cd ${dep}; makepkg -srci --asdeps; cd ..; done");
-  writefln("cd %s; makepkg -srci; cd ..", pkgname);
+  catch(Error)
+  {
+    writeln("echo Error received, no action.");
+  }
 }
