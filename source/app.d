@@ -268,7 +268,7 @@ void downloadWithDependencies(string pkgname)
       auto depStr = join(pacDeps, ' ');
       if (depStr.length > 0)
       {
-        writefln("sudo pacman -S --asdeps %s", depStr);
+        writefln("sudo pacman -S --asdeps --needed %s", depStr);
       }
 
       // Output shell commands to build everything - this is for the user to perform, not us
