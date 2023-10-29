@@ -5,6 +5,7 @@ import std.algorithm.searching;
 import std.array;
 import std.container.dlist;
 import std.container.rbtree;
+import std.file;
 import std.getopt;
 import std.json;
 import std.net.curl;
@@ -124,7 +125,7 @@ void subDownload(string[] args)
 
 void subDownloadAll(string[] args)
 {
-  downloadWithDependencies(args[0]);
+  downloadWithDependencies(args[0..$]);
 }
 
 auto lookupPackageName(string pkgname)
@@ -213,7 +214,7 @@ void downloadPackage(string pkgname)
   }
 }
 
-void downloadAndUntar(JSONValue pkgInfo)
+bool downloadAndUntar(JSONValue pkgInfo)
 {
   auto filename = pkgInfo["URLPath"].str.split('/')[$-1];
   download(aur_prefix ~ pkgInfo["URLPath"].str, filename);
@@ -221,18 +222,21 @@ void downloadAndUntar(JSONValue pkgInfo)
   if (result.status != 0)
   {
     stderr.writefln("Error unpacking %s.", filename);
+    return false;
   }
+  remove(filename);
+  return true;
 }
 
-void downloadWithDependencies(string pkgname)
+void downloadWithDependencies(string[] pkgnames)
 {
   try
   {
     auto depQueue = DList!string();
     auto pacTree = redBlackTree!string([]);
     string[] aurDeps;
-    depQueue.insert(pkgname);
-    auto seenPkgs = redBlackTree([pkgname]);
+    depQueue.insert(pkgnames);
+    auto seenPkgs = redBlackTree(pkgnames);
 
     while (!depQueue.empty)
     {
@@ -255,29 +259,57 @@ void downloadWithDependencies(string pkgname)
             }
           }
         if ("MakeDepends" in depObj)
-          pacTree.insert(map!(s => s.str)(depObj["MakeDepends"].array));
+          foreach (name ; depObj["MakeDepends"].array)
+          {
+            if (seenPkgs.insert(name.str) > 0)
+            {
+              depQueue.insertBack(name.str.split('>')[0].split('=')[0]);
+            }
+          }
       }
     }
 
     stderr.writeln("Done with packages.");
-    auto pacDeps = filter!(a => !canFind(seenPkgs.opSlice(), a))(pacTree.opSlice());
+
+    /* Now we output a script to deal with all of this. The goal is to have
+     * this output only appear when a flag is provided, but that is TBD.
+     */
+
+    // Get a list of items to be installed through Pacman; need to call array() to circumvent lazy analysis
+    auto pacDeps = pacTree.opSlice().filter!(a => !canFind(aurDeps, a))().array();
+
+    // Only reason length would not be zero is if the user specified only
+    // packages unavailable through AUR.
     if (aurDeps.length > 0)
     {
-      aurDeps = aurDeps[1..$];
+      // Only install things that were not specified by the user as dependencies
+      aurDeps = aurDeps.filter!(a => !canFind(pkgnames, a))().array();
 
-      auto depStr = join(pacDeps, ' ');
-      if (depStr.length > 0)
+      if (pacDeps.length > 0)
       {
-        writefln("sudo pacman -S --asdeps --needed %s", depStr);
+        // Download dependencies needed for packages and build
+        writefln("sudo pacman -S --asdeps --needed %s", join(pacDeps, ' '));
       }
 
       // Output shell commands to build everything - this is for the user to perform, not us
+      // These shell commands were written for ZSH compatibility, particularly for the PKGS array
+      writeln("BD=\"${PWD}\"");
       if (aurDeps.length > 0)
       {
-        writefln("for dep in %s", join(aurDeps.reverse.map!(s => "'" ~ s ~ "'"), ' '));
-        writeln("do; echo ${dep}; cd ${dep}; makepkg -srci --asdeps; cd ..; done");
+        // Any dependencies on AUR are handled here, so that they are installed as dependencies through --asdeps flag
+        writefln("for dep in %s", join(aurDeps.reverse, ' '));
+        writeln("do; echo ${dep}; cd ${dep}; makepkg -i --asdeps; cd \"${BD}\"; done");
       }
-      writefln("cd %s; makepkg -srci; cd ..", pkgname);
+      // Now handle the main event, installing as explicit
+      writeln("unset PKGS; set -a PKGS");
+      writefln("for pkg in %s", join(pkgnames, ' '));
+      writeln("do; echo ${pkg}; cd ${pkg}; makepkg; PKGS+=(${(f)\"$(makepkg --packagelist)\"}); cd \"${BD}\"; done");
+      writeln("sudo pacman -U ${PKGS}");
+      if (pacDeps.length > 0)
+      {
+        // Remove unneeded dependencies
+        writeln("sudo pacman -Rns $(pacman -Qtdq)");
+      }
     }
     else
     {
